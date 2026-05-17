@@ -19,6 +19,21 @@ from __future__ import annotations
 
 import torch
 
+# ------------------------------------------------------------------
+# Experiment-1 constants — edit these to switch conditions.
+#
+# POOLING : pooling strategy over non-padding tokens
+#           "last" — hidden state at the last non-padding position (default)
+#           "mean" — arithmetic mean over all non-padding positions
+#           "max"  — elementwise maximum over all non-padding positions
+#
+# LAYER   : index into the hidden_states tuple
+#           0 = token embedding; transformer block L → index L+1
+#           Default 15 = block 14 (~58% depth in Qwen2.5-0.5B, 24 blocks)
+# ------------------------------------------------------------------
+POOLING: str = "last"
+LAYER: int = 15
+
 
 def aggregate(
     hidden_states: torch.Tensor,
@@ -34,28 +49,25 @@ def aggregate(
                         tokens and 0 for padding.
 
     Returns:
-        A 1-D feature tensor of shape ``(hidden_dim,)`` or
-        ``(k * hidden_dim,)`` if multiple layers are concatenated.
+        A 1-D feature tensor of shape ``(hidden_dim,)``.
 
-    Student task:
-        Replace or extend the skeleton below with alternative layer selection,
-        token pooling (mean, max, weighted), or multi-layer fusion strategies.
+    Pooling strategy is selected by the module-level ``POOLING`` constant;
+    layer is selected by the module-level ``LAYER`` constant.  Pooling is
+    applied over the full non-padding sequence (prompt + response, no
+    prompt/response boundary — Option A per experiment-1-design.md §5.1).
     """
-    # ------------------------------------------------------------------
-    # STUDENT: Replace or extend the aggregation below.
-    # ------------------------------------------------------------------
+    layer = hidden_states[LAYER]   # (seq_len, hidden_dim)
+    mask = attention_mask.bool()   # (seq_len,) — True for real tokens
+    h = layer[mask]                # (n_real, hidden_dim) — padding removed
 
-    # Default: last real token of the final transformer layer.
-    layer = hidden_states[-1]          # (seq_len, hidden_dim)
-
-    # Find the index of the last real (non-padding) token.
-    real_positions = attention_mask.nonzero(as_tuple=False)  # (n_real, 1)
-    last_pos = int(real_positions[-1].item())                 # scalar index
-
-    feature = layer[last_pos]          # (hidden_dim,)
-
-    return feature
-    # ------------------------------------------------------------------
+    if POOLING == "last":
+        return h[-1]
+    elif POOLING == "mean":
+        return h.mean(dim=0)
+    elif POOLING == "max":
+        return h.max(dim=0).values
+    else:
+        raise ValueError(f"Unknown POOLING strategy: {POOLING!r}")
 
 
 def extract_geometric_features(
